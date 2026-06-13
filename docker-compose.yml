@@ -1,0 +1,272 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["-m", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes:
+      - ./deployments/tempo/tempo.yaml:/etc/tempo/config.yaml
+    ports:
+      - "3200:3200"
+
+  loki:
+    image: grafana/loki:3.1.1
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./deployments/loki/loki.yaml:/etc/loki/config.yaml
+    ports:
+      - "3100:3100"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.1
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./deployments/otel-collector/config.yaml:/etc/otel/config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    depends_on:
+      - tempo
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deployments/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes:
+      - ./deployments/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: ["-config.file=/etc/promtail/config.yaml"]
+    volumes:
+      - ./deployments/promtail/promtail.yaml:/etc/promtail/config.yaml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./deployments/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  risk-service:
+    build:
+      context: .
+      dockerfile: docker/risk-service.Dockerfile
+    environment:
+      PORT: "8082"
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - otel-collector
+    logging:
+      driver: json-file
+      options:
+        labels: "service"
+    labels:
+      service: risk-service
+
+  bank-simulator:
+    build:
+      context: .
+      dockerfile: docker/bank-simulator.Dockerfile
+    environment:
+      PORT: "8084"
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - otel-collector
+    labels:
+      service: bank-simulator
+
+  ledger-service:
+    build:
+      context: .
+      dockerfile: docker/ledger-service.Dockerfile
+    environment:
+      PORT: "8085"
+      DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    ports:
+      - "8085:8085"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/health/ready || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    labels:
+      service: ledger-service
+
+  payment-router:
+    build:
+      context: .
+      dockerfile: docker/payment-router.Dockerfile
+    environment:
+      PORT: "8083"
+      BANK_SIMULATOR_URL: http://bank-simulator:8084
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      bank-simulator:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    labels:
+      service: payment-router
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: docker/payment-service.Dockerfile
+    environment:
+      PORT: "8081"
+      RISK_SERVICE_URL: http://risk-service:8082
+      ROUTER_SERVICE_URL: http://payment-router:8083
+      LEDGER_SERVICE_URL: http://ledger-service:8085
+      NATS_URL: nats://nats:4222
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    depends_on:
+      risk-service:
+        condition: service_healthy
+      payment-router:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    labels:
+      service: payment-service
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/api-gateway.Dockerfile
+    environment:
+      PORT: "8080"
+      PAYMENT_SERVICE_URL: http://payment-service:8081
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      payment-service:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    labels:
+      service: api-gateway
+
+  notification-worker:
+    build:
+      context: .
+      dockerfile: docker/notification-worker.Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      OTLP_ENDPOINT: otel-collector:4317
+      SERVICE_VERSION: "0.1.0"
+    depends_on:
+      nats:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    labels:
+      service: notification-worker
+
+volumes:
+  postgres_data:

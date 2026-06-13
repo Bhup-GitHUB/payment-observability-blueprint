@@ -1,0 +1,7 @@
+.git
+*.md
+*.png
+scripts/
+deployments/
+.gitignore
+.dockerignore

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Observability Blueprint</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Payment Observability Blueprint</h1>
+      <p class="subtitle">Distributed tracing across a payment flow — OpenTelemetry · Prometheus · Grafana · Loki · Tempo</p>
+    </header>
+
+    <div class="card">
+      <h2>Send a Payment</h2>
+      <div class="form-row">
+        <div class="field">
+          <label for="merchant">Merchant ID</label>
+          <input id="merchant" type="text" value="merchant_demo" placeholder="merchant_id">
+        </div>
+        <div class="field">
+          <label for="amount">Amount (smallest unit)</label>
+          <input id="amount" type="number" value="1000" min="1">
+        </div>
+        <div class="field">
+          <label for="currency">Currency</label>
+          <select id="currency">
+            <option value="INR">INR</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+          </select>
+        </div>
+      </div>
+      <div class="scenarios">
+        <button class="btn success" onclick="sendPayment('success')">Success</button>
+        <button class="btn slow" onclick="sendPayment('slow')">Slow (2–4s bank delay)</button>
+        <button class="btn failure" onclick="sendPayment('failure')">Failure (bank decline)</button>
+        <button class="btn fraud" onclick="sendPayment('fraud')">Fraud (risk reject)</button>
+      </div>
+    </div>
+
+    <div class="card" id="result-card" style="display:none">
+      <h2>Result</h2>
+      <div id="result"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recent Payments</h2>
+      <div id="feed" class="feed"></div>
+    </div>
+
+    <div class="card links">
+      <h2>Observability</h2>
+      <div class="link-row">
+        <a href="http://localhost:3000" target="_blank" class="link-btn">Grafana</a>
+        <a href="http://localhost:9090" target="_blank" class="link-btn">Prometheus</a>
+        <a href="http://localhost:9093" target="_blank" class="link-btn">Alertmanager</a>
+        <a href="http://localhost:3000/explore" target="_blank" class="link-btn">Loki / Tempo</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
