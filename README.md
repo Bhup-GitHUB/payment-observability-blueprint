@@ -18,7 +18,7 @@ This prototype makes the observability infrastructure concrete. Every service em
 
 ```
 Merchant Client
-  └── API Gateway           :8080  entry point, trace root, web UI
+  └── API Gateway           :9080  entry point, trace root, web UI
         └── Payment Service  :8081  orchestrator
               ├── Risk Service       :8082  fraud evaluation
               ├── Payment Router     :8083  bank selection + forwarding
@@ -105,7 +105,7 @@ cd payment-observability-blueprint
 make up
 ```
 
-Wait about 30–60 seconds for all services to become healthy, then open `http://localhost:8080`.
+Wait about 30–60 seconds for all services to become healthy, then open `http://localhost:9080`.
 
 ---
 
@@ -113,7 +113,7 @@ Wait about 30–60 seconds for all services to become healthy, then open `http:/
 
 | Service              | Port |
 |----------------------|------|
-| API Gateway / Web UI | 8080 |
+| API Gateway / Web UI | 9080 |
 | Payment Service      | 8081 |
 | Risk Service         | 8082 |
 | Payment Router       | 8083 |
@@ -132,10 +132,10 @@ Grafana credentials: `admin / admin`
 
 ## Payment scenarios
 
-Send a request from the web UI at `http://localhost:8080` or with curl:
+Send a request from the web UI at `http://localhost:9080` or with curl:
 
 ```bash
-curl -s -X POST http://localhost:8080/api/payments \
+curl -s -X POST http://localhost:9080/api/payments \
   -H "Content-Type: application/json" \
   -d '{"merchant_id":"merchant_demo","amount":1000,"currency":"INR","scenario":"success"}' | jq .
 ```
