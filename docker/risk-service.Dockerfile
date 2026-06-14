@@ -1,12 +1,13 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /risk-service ./cmd/risk-service
+RUN CGO_ENABLED=0 GOOS=linux go build -p 1 -ldflags="-s -w" -o /risk-service ./cmd/risk-service
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM alpine:3.20
 COPY --from=builder /risk-service /risk-service
-USER nonroot:nonroot
+RUN apk add --no-cache wget && adduser -D appuser
+USER appuser
 EXPOSE 8082
 ENTRYPOINT ["/risk-service"]
